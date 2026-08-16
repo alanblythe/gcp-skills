@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "gcp-skills",
+  "version": "0.1.0",
+  "description": "Field notes for running Google Cloud without overpaying for it: where cost actually comes from, the billing-export traps that produce confident wrong numbers, and the Cloud Run billing model that charges an instance for existing.",
+  "author": { "name": "Alan Blythe" },
+  "homepage": "https://github.com/alanblythe/gcp-skills",
+  "repository": "https://github.com/alanblythe/gcp-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "gcp",
+    "google-cloud",
+    "cloud-cost",
+    "finops",
+    "cost-optimization",
+    "billing-export",
+    "bigquery",
+    "cloud-run",
+    "cpu-throttling",
+    "instance-based-billing",
+    "cloud-monitoring",
+    "terraform",
+    "infrastructure-drift"
+  ]
+}

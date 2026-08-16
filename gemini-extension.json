@@ -1,0 +1,5 @@
+{
+  "name": "gcp-skills",
+  "version": "0.1.0",
+  "description": "Field notes for running Google Cloud without overpaying for it: where cost actually comes from, the billing-export traps that produce confident wrong numbers, and the Cloud Run billing model that charges an instance for existing."
+}
