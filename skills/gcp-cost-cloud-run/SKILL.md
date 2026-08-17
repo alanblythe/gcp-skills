@@ -41,7 +41,7 @@ Google's published pricing model.
 | Does `gcloud run services describe` tell me? | **No — it will mislead you.** v1 exposes one service-level annotation that hides per-container divergence (CR6) |
 | Same Terraform, two environments, different cost — how? | A `gcloud` write normalises the setting onto every container; a Terraform write does not (CR7) |
 | Symptom that confirms it | `instance_count` reports **zero idle** instance-hours, and only instance-based SKUs appear (CR4) |
-| `Min Instance CPU` SKU bills but min instances is 0 | That SKU is **idle-retained instance time** under request-based billing, not configured min-instances (CR8) |
+| `Min Instance CPU` SKU bills but min instances is 0 | Unresolved — do not assume it meters idle retention (CR8) |
 | Which sidecars genuinely need always-on CPU? | Only ones that must do work between requests — background pollers, queue consumers (CR9) |
 | Is this fixed by caching or scaling changes? | **No.** It is a two-line configuration fix; scaling changes treat the symptom (CR10) |
 
@@ -52,7 +52,7 @@ large enough that it dominates every other Cloud Run cost decision.
 
 | Model | Bills for | Idle time | Set by |
 | :--- | :--- | :--- | :--- |
-| **Request-based** | time spent processing requests, plus a cheap idle rate for retained instances | cheap | CPU throttled outside requests (`cpu_idle = true`) |
+| **Request-based** | time spent processing requests, and measurably little else | effectively free | CPU throttled outside requests (`cpu_idle = true`) |
 | **Instance-based** | the **entire instance lifetime**, at full rate | full rate | CPU always allocated (`cpu_idle` false or absent) |
 
 Both models keep instances warm after a request. The difference is what that
@@ -73,7 +73,7 @@ Rules, not preferences. `⇒` means the platform gives no choice.
 | CR5 | Per-container CPU allocation is only exposed on the **v2** API, as `.template.containers[].resources.cpuIdle`, and the field is **omitted when false** | ⇒ absent ≠ unset-and-harmless; absent **means always allocated** ⇒ a presence check reads the wrong answer |
 | CR6 | The v1 API models CPU allocation as a **single service-level annotation** (`run.googleapis.com/cpu-throttling`) | ⇒ `gcloud run services describe` reports one value for a service whose containers disagree ⇒ it will report `true` while the service bills instance-based |
 | CR7 | `gcloud run services update` round-trips the service through v1, and writing back that single annotation **normalises it onto every container** | ⇒ a gcloud-deployed environment silently acquires the correct setting ⇒ a Terraform-deployed environment with identical source does not ⇒ the divergence is invisible in the repository |
-| CR8 | The `Min Instance CPU/Memory (Request-based billing)` SKU meters **idle-retained instance time**, not configured minimum instances | ⇒ it appears with `min-instances = 0` ⇒ and is **absent** on an instance-based service, because such a service records no idle time |
+| CR8 | Retention is nearly free under request-based billing — a service observed with ~90% idle instance time billed **68 CPU-seconds** in the same window, and emitted no min-instance SKU at all | ⇒ converting a service does not trade full-rate billing for a smaller idle bill; it removes substantially the whole line ⇒ but a `Min Instance CPU (Request-based billing)` SKU billing while `minInstanceCount` is unset is a **real and unexplained** observation, so do not build a cost model on what it meters |
 | CR9 | A throttled sidecar gets CPU **only while a request is in flight** | ⇒ background pollers stall between requests ⇒ batched exporters flush late and can lose a tail at shutdown |
 | CR10 | Instance-based cost scales with **instance-hours**, which scale with request *arrival spacing*, not request *count* | ⇒ a handful of requests spread through the day costs more than the same count in one burst ⇒ and the bill grows as traffic arrives more evenly, long before volume matters |
 
@@ -86,7 +86,8 @@ one answers.
 
 Query the billing export for the project's Cloud Run SKUs. A service on
 request-based billing produces `Services CPU (Request-based billing)` and
-usually `Min Instance CPU (Request-based billing)`. A project showing **only**
+often the `Requests` SKU too, which is emitted **only** under request-based billing
+and is therefore the cleanest categorical proof of the mode. A project showing **only**
 `Services CPU (Instance-based billing)` and no request-based line at all is on
 instance-based billing regardless of what its configuration says.
 
@@ -211,3 +212,26 @@ idle, and grows steadily as real traffic arrives. Finding it on a quiet
 pre-launch environment and dismissing it as small is the expensive mistake —
 that is the moment it costs least to fix and the point after which it only
 grows.
+
+### What the fix actually recovered, measured
+
+One deployment, before and after, on a service whose sidecars were the only
+thing holding it on instance-based billing:
+
+| | Before | After |
+| :--- | ---: | ---: |
+| CPU billed, per full day | 45,000–56,000 s | **68 s** in the post-deploy window |
+| `instance_count` idle share | **0%** across 7 days | ~90% within 6 hours |
+| SKUs emitted | instance-based only | request-based CPU + memory, and `Requests` |
+
+Two things are worth taking from the shape of that rather than the numbers.
+
+The `Requests` SKU appearing is the moment the change is *proven*, because that
+SKU cannot be emitted under instance-based billing. Cost movement alone would
+have been suggestive; a SKU that categorically cannot exist in the old mode is
+not.
+
+And the recovery is close to total rather than partial. The intuition that a
+converted service still pays a reduced idle bill did not survive contact with
+the export — retention is nearly free, so the line does not shrink so much as
+mostly disappear (CR8).
